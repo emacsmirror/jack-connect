@@ -78,13 +78,13 @@ ALIST is an annotated alist of ports as produced by jack_lsp."
 		      (setq res (cons alist res))
 		      (setq connections nil)
 		      (setq port-type nil)
-		      (setq properties nil)
-		      ))))))
+		      (setq properties nil)))))))
       (dolist (port ports)
       	(setcdr port (push (cons 'connectable (jack-connectable-port port ports))
 			   (cdr port))))
       ports)))
 
+;;;###autoload
 (defun jack-connect (port1 port2)
   "Connect PORT1 to PORT2."
   (interactive
@@ -102,6 +102,7 @@ ALIST is an annotated alist of ports as produced by jack_lsp."
   (when port1
    (call-process "jack_connect" nil nil nil port1 port2)))
 
+;;;###autoload
 (defun jack-disconnect (port1 port2)
   "Disconnect the two connected ports PORT1 and PORT2."
   (interactive
@@ -135,19 +136,6 @@ CONNECTIONS is the list of ports connected to FROM."
   (when from
     (dolist (to connections)
       (jack-disconnect from to))))
-
-
-;; (defvar jackd-default-driver "alsa")
-
-;; (defun jack-start ()
-;;   (interactive)
-;;   (start-process "jack" (get-buffer-create "*jackd-output*") "jackd" "-d" jackd-default-driver)
-;;   (switch-to-buffer-other-window "*jackd-output*" )
-;;   )
-
-;; (defun jack-stop ()
-;;   (interactive)
-;;   (stop-process "jack"))
 
 (provide 'jack-connect)
 
