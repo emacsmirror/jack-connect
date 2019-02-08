@@ -1,6 +1,7 @@
+;;; -*- lexical-binding: t -*-
 ;;; jack-connect.el --- Manage jack connections within Emacs
 
-;; Copyright (C) 2014 Stefano Barbi
+;; Copyright (C) 2014-2019 Stefano Barbi
 ;; Author: Stefano Barbi <stefanobarbi@gmail.com>
 ;; Version: 0.1
 
