@@ -25,121 +25,157 @@
 
 ;;; Code:
 
-(require 'ido)
+
+(require 'let-alist)
 
 ;;; helper functions
-(defun jack-port-get (port tag)
-  "Helper function to get properties from port alist.
-PORT is an element of the alist.
-TAG is a symbol."
-  (cdr (assq tag port)))
 
-(defun jack-port-filter (pred alist)
+(defvar *jack-ports* nil
+  "A global var representing a list of jack ports.")
+
+(defun jack-port-filter (pred)
   "Filter ports according to PRED.
 PRED is a function of a port record returning boolean.
 ALIST is an annotated alist of ports as produced by jack_lsp."
-  (let ((res nil))
-    (dolist (port alist res)
-      (when (funcall pred port)
-	(setq res (cons port res))))))
+  (seq-filter pred *jack-ports*))
 
-(defun jack-connectable-port (port alist)
-  "Select the ports that can be connected to PORT from ALIST."
-  (let ((port-connections (jack-port-get port 'connections))
-	(res nil)
-	(port-type (jack-port-get port 'type))
-	(match-str (if (string-match "input," (jack-port-get port 'properties)) "output," "input,")))
-    (dolist (oprt alist res)
-      (when (and (not (equal (car oprt) (car port)))
-		 (equal (jack-port-get oprt 'type) port-type)
-		 (string-match match-str (jack-port-get oprt 'properties))
-		 (not (member (car oprt) port-connections)))
-	(setq res (cons (car oprt) res))))))
+(defun jack-port-find (pred)
+  "Filter ports according to PRED.
+PRED is a function of a port record returning boolean.
+ALIST is an annotated alist of ports as produced by jack_lsp."
+  (seq-find pred *jack-ports*))
+
+(defun jack-port-input-p (port)
+  "Return t if PORT is an input port."
+  (member 'input (alist-get 'properties port)))
+
+(defun jack-port-output-p (port)
+  "Return t if PORT is an output port."
+  (member 'output (alist-get 'properties port)))
+
+(defun jack-port-name (port)
+  "Return the name of the PORT."
+  (alist-get 'name port))
+
+(defun jack-port-can-connect-p (port)
+  "Return a predicate that tell if a port can be connected to PORT."
+  (let ((port-connections (alist-get 'connections port))
+	(port-type (alist-get 'type port))
+        (port-name (alist-get 'name port)))
+    (if (jack-port-input-p port)
+        (lambda (oprt)
+          (let-alist oprt
+            (and (not (eq port oprt))
+               (not (equal .name port-name))
+               (jack-port-output-p oprt)
+	       (equal .type port-type)
+	       (not (member .name port-connections)))))
+      (lambda (oprt)
+          (let-alist oprt
+            (and (not (eq port oprt))
+               (not (equal .name port-name))
+               (jack-port-input-p oprt)
+	       (equal .type port-type)
+	       (not (member .name port-connections))))))))
+
+(defun make-empty-port ()
+  "Make an empty port."
+  (copy-tree `((name)
+               (connections)
+               (type)
+               (properties))))
 
 (defun jack-lsp ()
-  "Build a port alist parsing the output of jack_lsp."
-  (let ((lines (reverse (process-lines "jack_lsp" "-ctp")))
-	(res) (port-type) (connections) (properties) (port-name))
-    (let ((ports
-	   (dolist (line lines res )
-	     (cond ((string-match "^ \\{3\\}\\(.*\\)" line)
-		    (let ((connection (replace-match "\\1" nil nil line)))
-		      (setq connections (cons connection connections))))
-		   ((string-match "^[ \t]+properties: \\(.*\\)" line)
-		    (let ((property (replace-match "\\1" nil nil line)))
-		      (setq properties property)))
-		   ((string-match "^[ \t]+\\(.*\\)" line)
-		    (setq port-type (replace-match "\\1" nil nil line)))
-		   (t
-		    (let ((alist (cons line
-				       (list
-					(cons 'connections connections)
-					(cons 'type port-type)
-					(cons 'properties properties)))))
-		      (setq res (cons alist res))
-		      (setq connections nil)
-		      (setq port-type nil)
-		      (setq properties nil)))))))
-      (dolist (port ports)
-      	(setcdr port (push (cons 'connectable (jack-connectable-port port ports))
-			   (cdr port))))
-      ports)))
+  "Update the port alist parsing the output of jack_lsp."
+  (let ((ports) (current-port (make-empty-port)))
+    (dolist (line (reverse (process-lines "jack_lsp" "-ctp")))
+      (cond
+       ((string-match "^[ \t]+properties: \\(.*\\)" line)
+        (setf (alist-get 'properties current-port)
+              (mapcar 'intern
+                      (split-string (replace-match "\\1" nil nil line) "," t))))
+
+       ((string-match "^ \\{3\\}\\(.*\\)" line)
+	(push (replace-match "\\1" nil nil line)
+              (alist-get 'connections current-port)))
+                   
+       ((string-match "^[ \t]+\\(.*\\)" line)
+        (setf (alist-get 'type current-port)
+              (replace-match "\\1" nil nil line)))
+
+       ;; port name (this is the last element parsed when the output
+       ;; of jack_lsp is reverted)
+       (t
+        (setf (alist-get 'name current-port) line)
+        (push current-port ports)
+        (setq current-port (make-empty-port)))))
+    (setf *jack-ports* ports)))
+
+
+(defun jack-get-port (name)
+  "Retrieve a port by NAME."
+  (seq-find (lambda (prt) (equal (jack-port-name prt) name))
+            *jack-ports*))
 
 ;;;###autoload
 (defun jack-connect (port1 port2)
   "Connect PORT1 to PORT2."
   (interactive
-   (let ((from-ports (jack-port-filter (lambda (p) (jack-port-get p 'connectable)) (jack-lsp))))
-     (if from-ports
-	 (let* 	((from-port-string (ido-completing-read "Output port: " (mapcar 'car from-ports)))
-		 (from-port (assoc from-port-string from-ports))
-		 (to-ports (jack-port-get from-port 'connectable))
-		 (to-port-string (ido-completing-read
-				  (format "Connect %s (%s) to: " from-port-string (jack-port-get from-port 'type))
-				  to-ports)))
-	   (list from-port-string to-port-string))
-       (progn (message "No port can be connected")
-	      (list nil nil)))))
+   (progn
+     (jack-lsp)
+     (let ((from-ports (jack-port-filter #'jack-port-output-p)))
+       (if from-ports
+	   (let* ((from-port-string (completing-read "Output port: " (mapcar #'jack-port-name from-ports)))
+		  (from-port        (jack-get-port from-port-string))
+                  (to-ports         (jack-port-filter (jack-port-can-connect-p from-port)))
+		  (to-port-string   (completing-read
+		        	     (format "Connect %s (%s) to: " from-port-string (alist-get 'type from-port))
+		        	     (mapcar #'jack-port-name to-ports))))
+	     (list from-port-string to-port-string))
+         (progn (message "No port can be connected")
+	        (list nil nil))))))
   (when port1
-   (call-process "jack_connect" nil nil nil port1 port2)))
+    (call-process "jack_connect" nil nil nil port1 port2)))
 
 ;;;###autoload
 (defun jack-disconnect (port1 port2)
   "Disconnect the two connected ports PORT1 and PORT2."
   (interactive
-   (let ((from-ports (jack-port-filter (lambda (p) (jack-port-get p 'connections)) (jack-lsp))))
-     (if from-ports
-	 (let* ((from-port-string (ido-completing-read "Disconnect port: " (mapcar 'car from-ports)))
-		(from-port (assoc from-port-string from-ports))
-		(to-ports (jack-port-get from-port 'connections))
-		(to-port-string (ido-completing-read "From port: " to-ports)))
-	   (list from-port-string to-port-string))
-       (progn (message "No port can be disconnected")
-	      (list nil nil)))))
+   (progn
+     (jack-lsp)
+     (let ((from-ports (jack-port-filter (lambda (p) (alist-get 'connections p)))))
+       (if from-ports
+	   (let* ((from-port-string (completing-read "Disconnect port: " (mapcar #'jack-port-name from-ports)))
+		  (from-port (jack-get-port from-port-string))
+		  (to-ports (alist-get 'connections from-port))
+		  (to-port-string (completing-read "From port: " to-ports)))
+	     (list from-port-string to-port-string))
+         (progn (message "No port can be disconnected")
+	        (list nil nil))))))
   (when port1
-   (call-process "jack_disconnect" nil nil nil port1 port2)))
+    (call-process "jack_disconnect" nil nil nil port1 port2)))
 
-
+;;;###autoload
 (defun jack-disconnect-all-from (from connections)
   "Disconnect all the ports connected to FROM port.
 CONNECTIONS is the list of ports connected to FROM."
   (interactive
-   (let ((from-ports (jack-port-filter (lambda (p) (jack-port-get p 'connections)) (jack-lsp))))
-     (if from-ports
-	 (let ((from-port-string (ido-completing-read "Disconnect all connections from port: "
-						      (mapcar 'car from-ports))))
-	   (if (yes-or-no-p (format "Disconnecting all connections from %s. Are you sure"
+   (progn
+     (jack-lsp)
+     (let ((from-ports (jack-port-filter (lambda (p) (alist-get 'connections p)))))
+       (if from-ports
+	   (let ((from-port-string (completing-read "Disconnect all connections from port: "
+					     (mapcar #'jack-port-name from-ports))))
+	     (if (yes-or-no-p (format "Disconnecting all connections from %s. Are you sure"
 				      from-port-string))
-	       (list from-port-string (jack-port-get (assoc from-port-string from-ports) 'connections) )
-	     (list nil nil)))
-       (progn (message "No port can be disconnected")
-	      (list nil nil)))))
+	         (list from-port-string (alist-get 'connections (jack-port-get from-port-string)))
+	       (list nil nil)))
+         (progn (message "No port can be disconnected")
+	        (list nil nil))))))
   (when from
     (dolist (to connections)
       (jack-disconnect from to))))
 
 (provide 'jack-connect)
 
-;;; jack-connect.el ends here
-
-
+;; jack-connect.el ends here
