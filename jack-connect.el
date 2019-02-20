@@ -117,7 +117,7 @@
                                   elem))))
            (cons new-elt nodes)))))))
 
-(defun make-jack-nodes (strings)
+(defun make-j--nodes (strings)
   "Construct a jack-nodes tree from STRINGS."
   (let ((tree))
     (dolist (str strings)
@@ -194,9 +194,9 @@
                 (and (funcall predicate node) node))
                (`(,prefix . ,nodes)
                 (let ((nodes (j--nodes-filter nodes
-                                             predicate)))
+                                              predicate)))
                   (and nodes (cons prefix
-                                  nodes)))))))
+                                 nodes)))))))
     (seq-filter #'identity
                 (mapcar #'filter-node nodes))))
 
@@ -320,7 +320,7 @@
              p2s)))
 
 
-(defun j--merge-connections (ports)
+(defun jack--merge-connections (ports)
   "Return the union of the connections of PORTS."
   (cl-reduce #'cl-union
              (mapcar #'jack-port-connections ports)))
@@ -340,8 +340,8 @@
             (sel1  (completing-read "disconnect jack port(s): " node1))
             (p1s   (cdr (assoc sel1 node1)))
             ;; make an alst with p1s
-            (node2 (-> (j--merge-connections p1s)
-                      (make-jack-nodes)
+            (node2 (-> (jack--merge-connections p1s)
+                      (make-j--nodes)
                       (j--nodes-compress)
                       (j--nodes-flatten)
                       (j--nodes-decorate)))
