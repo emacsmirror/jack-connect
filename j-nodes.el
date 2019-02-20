@@ -92,8 +92,8 @@
 
 
 (defun j-nodes-disband (nodes key)
-  "Disband NODES when KEY on the discendent atoms gives different results."
-  ;; disband: ("a" ("b") ("c")) => (("ab") ("ac"))
+  "Disband NODES when applying KEY on children gives different results."
+  ;; disband: (("a" ("b") ("c")) => (("ab") ("ac"))
   (letrec ((extract-properties
             (lambda (node)
               (pcase node
