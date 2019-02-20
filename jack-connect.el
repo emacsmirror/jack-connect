@@ -148,14 +148,15 @@
   (mapcar #'j-compress-node* nodes))
 
 
-(defun j-nodes-disband (nodes keep-key)
-  "Disband NODES when KEEP-KEY on the discendent atoms gives different results."
+(defun j-nodes-disband (nodes key)
+  "Disband NODES when KEY on the discendent atoms gives different results."
+  ;; disband: ("a" ("b") ("c")) => (("ab") ("ac"))
   (letrec ((j-extract-properties
             (lambda (node)
               (pcase node
                 ((pred atom)
                  ;; (props node)
-                 `(,(funcall keep-key node) ,node))
+                 `(,(funcall key node) ,node))
                 
                 (`(,prefix . ,nodes)
                  (let* ((prop+nodes   (mapcar j-extract-properties nodes))
@@ -217,6 +218,7 @@
       alst)))
 
 (defun j-nodes-mutate (nodes mutator)
+  "Mutate terminal elements in NODES by applying the function of one argument MUTATOR."
   (let ((mutate-node
          (lambda (node)
            (pcase node
