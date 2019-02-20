@@ -32,7 +32,7 @@
 (defvar *j-tree* nil)
 (defvar *j-ports* (make-hash-table :test #'equal))
 
-(defun j--make-port (name &optional client port-name)
+(defun jack--make-port (name &optional client port-name)
   "Create the port record NAME with optional CLIENT and PORT-NAME."
   (puthash name
            (copy-tree `((:client ,@client)
@@ -42,7 +42,8 @@
                         (:properties)))
            *j-ports*))
 
-(defun j--port-names ()
+(defun jack--port-names ()
+  "Return a list of port names."
   (let ((lst))
     (maphash (lambda (k v) (push k lst)) *j-ports*)
     lst))
@@ -122,7 +123,7 @@
         (cl-destructuring-bind (client port)
             (split-string line ":")
           (setf current-port line)
-          (j--make-port current-port client port)
+          (jack--make-port current-port client port)
           (setf tree (j-nodes-push tree current-port current-port))))))
     (setf *j-tree* (j-nodes-compress tree))))
 
