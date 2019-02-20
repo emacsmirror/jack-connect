@@ -48,11 +48,14 @@
                                   elem))))
            (cons new-elt nodes)))))))
 
-(defun make-j-nodes (strings)
-  "Construct a jack-nodes tree from STRINGS."
-  (let ((tree))
-    (dolist (str strings)
-      (setf tree (j-nodes-push tree str str)))
+(defun make-j-nodes (strings &optional atoms)
+  "Construct a jack-nodes tree from a list of STRINGS and an optional corresponding list ot ATOMS.   If atoms are not provided the strings will be used as atoms."
+  (let ((tree)
+        (atoms (or atoms strings )))
+    (cl-loop for str in strings
+             for atom in atoms
+             do
+             (setf tree (j-nodes-push tree str atom)))
     (j-nodes-compress tree)))
 
 
