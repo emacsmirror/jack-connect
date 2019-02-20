@@ -33,29 +33,32 @@
 
 (defun make-empty-port ()
   "Make an empty port."
-  (copy-tree `((client)
-               (name)
-               (connections)
-               (type)
-               (properties))))
+  (copy-tree '((:client)
+               (:name)
+               (:connections)
+               (:type)
+               (:properties))))
 
 (defmacro jack-get-port (port)
   `(gethash ,port *j-ports*))
 
-(defmacro jack-port-properties (port)
-  `(alist-get :properties  (jack-get-port ,port)))
 
-(defmacro jack-port-type (port)
-  `(alist-get :type        (jack-get-port ,port)))
+(defmacro define-jack-port-accessor (name kw)
+  "Define NAME as both a getter and setter of a jack port property KW."
+  `(progn
+     (defun ,name (port)
+       (alist-get ,kw (jack-get-port port)))
+     (gv-define-simple-setter
+      ,name
+      (lambda (port value)
+        (setf (alist-get ,kw (jack-get-port port)) value)))))
 
-(defmacro jack-port-name (port)
-  `(alist-get :name        (jack-get-port ,port)))
+(define-jack-port-accessor jack-port-properties  :properties)
+(define-jack-port-accessor jack-port-type        :type)
+(define-jack-port-accessor jack-port-name        :name)
+(define-jack-port-accessor jack-port-connections :connections)
+(define-jack-port-accessor jack-port-client      :client)
 
-(defmacro jack-port-connections (port)
-  `(alist-get :connections (jack-get-port ,port)))
-
-(defmacro jack-port-client (port)
-  `(alist-get :client      (jack-get-port ,port)))
 
 (defun jack-port-input-p (port)
   "Return t if PORT is an input port."
@@ -316,8 +319,7 @@
 (defun jack-merge-connections (ports)
   "Return the union of the connections of PORTS."
   (cl-reduce #'cl-union
-             (mapcar (lambda (p) (jack-port-connections p))
-                     ports)))
+             (mapcar #'jack-port-connections ports)))
 
 ;;;###autoload
 (defun jack-disconnect (p1s p2s)
@@ -326,7 +328,7 @@
    (progn
      (jack-lsp)
      (let* ((node1 (-> *j-tree*
-                      (j-nodes-disband (lambda (p) (jack-port-client p)))
+                      (j-nodes-disband #'jack-port-client)
                       (j-nodes-filter #'jack-port-connected-p)
                       (j-nodes-compress)
                       (j-nodes-flatten)
