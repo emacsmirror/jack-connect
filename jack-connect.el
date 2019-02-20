@@ -53,13 +53,15 @@
 
 (defmacro define-jack-port-accessor (name kw)
   "Define NAME as both a getter and setter of a jack port property KW."
-  `(progn
-     (defun ,name (port)
-       (alist-get ,kw (jack-get-port port)))
-     (gv-define-simple-setter
-      ,name
-      (lambda (port value)
-        (setf (alist-get ,kw (jack-get-port port)) value)))))
+  (let ((setter (intern (format "%s-set" name))))
+    `(progn
+       (defun ,name (port)
+         (alist-get ,kw (jack-get-port port)))
+       (defun ,setter (port value)
+         (setf (alist-get ,kw (jack-get-port port)) value))
+       (gv-define-simple-setter
+        ,name
+        ,setter))))
 
 (define-jack-port-accessor jack-port-properties  :properties)
 (define-jack-port-accessor jack-port-type        :type)
