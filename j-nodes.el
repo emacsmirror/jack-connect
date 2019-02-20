@@ -22,7 +22,7 @@
 (require 'cl-lib)
 (require 'seq)
 
-(defun j--nodes-push (nodes keystr elem)
+(defun j-nodes-push (nodes keystr elem)
   "Add the atomic value ELEM to NODES, indexed by KEYSTR."
   (if (string-empty-p keystr)
       ;; terminal node. elem must be atomic
@@ -43,17 +43,17 @@
         (_
          (let ((new-elt
                 `(,first-char
-                  ,@(j--nodes-push (list)
+                  ,@(j-nodes-push (list)
                                   rest-string
                                   elem))))
            (cons new-elt nodes)))))))
 
-(defun make-j--nodes (strings)
+(defun make-j-nodes (strings)
   "Construct a jack-nodes tree from STRINGS."
   (let ((tree))
     (dolist (str strings)
-      (setf tree (j--nodes-push tree str str)))
-    (j--nodes-compress tree)))
+      (setf tree (j-nodes-push tree str str)))
+    (j-nodes-compress tree)))
 
 
 (defun j--node-prepend-string (node prefix)
@@ -83,12 +83,12 @@
     (err (error "Invalid node %s" err))))
 
 
-(defun j--nodes-compress (nodes)
+(defun j-nodes-compress (nodes)
   "Compress NODES by merging parents of one child with their children."
   (mapcar #'j--compress-node* nodes))
 
 
-(defun j--nodes-disband (nodes key)
+(defun j-nodes-disband (nodes key)
   "Disband NODES when KEY on the discendent atoms gives different results."
   ;; disband: ("a" ("b") ("c")) => (("ab") ("ac"))
   (letrec ((extract-properties
@@ -114,9 +114,9 @@
                                    nodes)))))))))
     (let* ((prop+nodes (mapcar extract-properties nodes))
            (nodes      (mapcan #'cdr prop+nodes)))
-      (j--nodes-compress nodes))))
+      (j-nodes-compress nodes))))
 
-(defun j--nodes-filter (nodes predicate)
+(defun j-nodes-filter (nodes predicate)
   "Keep only NODES where PREDICATE is t."
   (cl-flet ((filter-node
              (node)
@@ -124,14 +124,14 @@
                ((pred atom)
                 (and (funcall predicate node) node))
                (`(,prefix . ,nodes)
-                (let ((nodes (j--nodes-filter nodes
+                (let ((nodes (j-nodes-filter nodes
                                               predicate)))
                   (and nodes (cons prefix
                                  nodes)))))))
     (seq-filter #'identity
                 (mapcar #'filter-node nodes))))
 
-(defun j--nodes-flatten (nodes)
+(defun j-nodes-flatten (nodes)
   "Traverse NODES recursively and accumulate atoms into a flatten alist."
   (let ((alst))
     (letrec ((collect-node
@@ -157,16 +157,16 @@
         (funcall collect-node node ""))
       alst)))
 
-(defun j--nodes-mutate (nodes mutator)
+(defun j-nodes-mutate (nodes mutator)
   "Mutate terminal elements in NODES by applying the function of one argument MUTATOR."
   (let ((mutate-node
          (lambda (node)
            (pcase node
              ((pred atom) (funcall mutator node))
-             (`(,ch . ,nodes) (j--nodes-mutate nodes mutator))))))
+             (`(,ch . ,nodes) (j-nodes-mutate nodes mutator))))))
     (mapcar 'mutate-node nodes)))
 
-(defun j--nodes-decorate (alst)
+(defun j-nodes-decorate (alst)
   "Append `*' to keys with more than one value in ALST."
   (mapcar (lambda (kv)
             (pcase kv
