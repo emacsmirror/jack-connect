@@ -29,7 +29,6 @@
 (require 'seq)
 (require 'j-nodes)
 
-(defvar *j-tree* nil)
 (defvar *j-ports* (make-hash-table :test #'equal))
 
 (defun jack--make-port (name &optional client port-name)
@@ -42,7 +41,7 @@
                         (:properties)))
            *j-ports*))
 
-(defun jack--port-names ()
+(defun jack--list-ports ()
   "Return a list of port names."
   (let ((lst))
     (maphash (lambda (k v) (push k lst)) *j-ports*)
@@ -97,8 +96,7 @@
 
 (defun jack-lsp ()
   "Update the port tree parsing the output of jack_lsp."
-  (let ((current-port nil)
-        (tree (list)))
+  (let ((current-port nil))
     (clrhash *j-ports*)
     (dolist (line (process-lines "jack_lsp" "-ctp"))
       (cond
@@ -123,9 +121,7 @@
         (cl-destructuring-bind (client port)
             (split-string line ":")
           (setf current-port line)
-          (jack--make-port current-port client port)
-          (setf tree (j-nodes-push tree current-port current-port))))))
-    (setf *j-tree* (j-nodes-compress tree))))
+          (jack--make-port current-port client port)))))))
 
 ;;;###autoload
 (defun jack-connect (p1s p2s)
@@ -133,7 +129,9 @@
   (interactive
    (progn
      (jack-lsp)
-     (let* ((node1 (-> *j-tree*
+     (let* ((tree   (-> (jack--list-ports)
+                       (make-j-nodes)))
+            (node1 (-> tree
                       (j-nodes-filter #'jack-port-output-p)
                       (j-nodes-disband (lambda (p)
                                          (list
@@ -145,7 +143,7 @@
             (sel1  (completing-read "connect: " node1))
             (p1s   (cdr (assoc sel1 node1)))
             (type  (jack-port-type (car p1s)))
-            (node2 (-> *j-tree*
+            (node2 (-> tree
                       (j-nodes-filter #'jack-port-input-p)
                       (j-nodes-filter (lambda (p)
                                         (string= (jack-port-type p) type)))
@@ -176,7 +174,8 @@
   (interactive
    (progn
      (jack-lsp)
-     (let* ((node1 (-> *j-tree*
+     (let* ((node1 (-> (jack--list-ports)
+                      (make-j-nodes)
                       (j-nodes-disband #'jack-port-client)
                       (j-nodes-filter #'jack-port-connected-p)
                       (j-nodes-compress)
