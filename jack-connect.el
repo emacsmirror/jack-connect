@@ -1,9 +1,8 @@
-;;; -*- lexical-binding: t -*-
-;;; jack-connect.el --- Manage jack connections within Emacs
+;;; jack-connect.el --- Manage jack connections within Emacs -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2014-2019 Stefano Barbi
 ;; Author: Stefano Barbi <stefanobarbi@gmail.com>
-;; Version: 0.1
+;; Version: 0.2
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -25,157 +24,346 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'dash)
+(require 'seq)
 
-(require 'let-alist)
-
-;;; helper functions
-
-(defvar *jack-ports* nil
-  "A global var representing a list of jack ports.")
-
-(defun jack-port-filter (pred)
-  "Filter ports according to PRED.
-PRED is a function of a port record returning boolean.
-ALIST is an annotated alist of ports as produced by jack_lsp."
-  (seq-filter pred *jack-ports*))
-
-(defun jack-port-find (pred)
-  "Filter ports according to PRED.
-PRED is a function of a port record returning boolean.
-ALIST is an annotated alist of ports as produced by jack_lsp."
-  (seq-find pred *jack-ports*))
-
-(defun jack-port-input-p (port)
-  "Return t if PORT is an input port."
-  (member 'input (alist-get 'properties port)))
-
-(defun jack-port-output-p (port)
-  "Return t if PORT is an output port."
-  (member 'output (alist-get 'properties port)))
-
-(defun jack-port-name (port)
-  "Return the name of the PORT."
-  (alist-get 'name port))
-
-(defun jack-port-can-connect-p (port)
-  "Return a predicate that tell if a port can be connected to PORT."
-  (let ((port-connections (alist-get 'connections port))
-	(port-type (alist-get 'type port))
-        (port-name (alist-get 'name port)))
-    (if (jack-port-input-p port)
-        (lambda (oprt)
-          (let-alist oprt
-            (and (not (eq port oprt))
-               (not (equal .name port-name))
-               (jack-port-output-p oprt)
-	       (equal .type port-type)
-	       (not (member .name port-connections)))))
-      (lambda (oprt)
-          (let-alist oprt
-            (and (not (eq port oprt))
-               (not (equal .name port-name))
-               (jack-port-input-p oprt)
-	       (equal .type port-type)
-	       (not (member .name port-connections))))))))
+(defvar *j-tree* nil)
+(defvar *j-ports* (make-hash-table :test #'equal))
 
 (defun make-empty-port ()
   "Make an empty port."
-  (copy-tree `((name)
+  (copy-tree `((client)
+               (name)
                (connections)
                (type)
                (properties))))
 
+(defmacro jack-get-port (port)
+  `(gethash ,port *j-ports*))
+
+(defmacro jack-port-properties (port)
+  `(alist-get :properties  (jack-get-port ,port)))
+
+(defmacro jack-port-type (port)
+  `(alist-get :type        (jack-get-port ,port)))
+
+(defmacro jack-port-name (port)
+  `(alist-get :name        (jack-get-port ,port)))
+
+(defmacro jack-port-connections (port)
+  `(alist-get :connections (jack-get-port ,port)))
+
+(defmacro jack-port-client (port)
+  `(alist-get :client      (jack-get-port ,port)))
+
+(defun jack-port-input-p (port)
+  "Return t if PORT is an input port."
+  (and (memq 'input (jack-port-properties port)) t))
+
+(defun jack-port-output-p (port)
+  "Return t if PORT is an output port."
+  (and (memq 'output (jack-port-properties port)) t))
+
+(defun jack-port-audio-p (port)
+  "Return t if PORT is an output port."
+  (string-match-p "audio" (jack-port-type port)))
+
+(defun jack-port-midi-p (port)
+  "Return t if PORT is an output port."
+  (string-match-p "midi" (jack-port-type port)))
+
+(defun jack-port-connected-p (port)
+  "Return t if PORT is an output port."
+  (jack-port-connections port))
+
+
+;;; node: atom || (ch node ...))
+;;; nodes|tree: (node ...)
+
+(defun j-nodes-push (nodes keystr elem)
+  "Add the atomic value ELEM to NODES, indexed by KEYSTR."
+  (if (string-empty-p keystr)
+      ;; terminal node. elem must be atomic
+      (cons elem nodes)
+    (let* ((first-char    (substring keystr 0 1))
+           (rest-string   (substring keystr 1))
+           (matching-node (assoc first-char nodes #'string=)))
+      (pcase matching-node
+        ;; found a node
+        (`(,_ . ,children)
+         (setf (cdr matching-node)
+               (j-nodes-push children
+                             rest-string
+                             elem))
+         
+         nodes)
+        ;; no matching node found
+        (_
+         (let ((new-elt
+                `(,first-char
+                  ,@(j-nodes-push (list)
+                                  rest-string
+                                  elem))))
+           (cons new-elt nodes)))))))
+
+(defun make-jack-nodes (strings)
+  "Construct a jack-nodes tree from STRINGS."
+  (let ((tree))
+    (dolist (str strings)
+      (setf tree (j-nodes-push tree str str)))
+    (j-nodes-compress tree)))
+
+
+(defun j-node-prepend-string (node prefix)
+  "Prepend a PREFIX to the string of a NODE."
+  (pcase node
+    ((pred atom) node)
+
+    (`(,suffix . ,nodes)
+     `(,(concat prefix suffix) ,@nodes))))
+
+
+;;; TODO: make this an inner function?
+(defun j-compress-node* (node)
+  (pcase node
+    ;; only one child
+    ((pred atom) node)
+    
+    (`(,prefix (,suf . ,nodes))
+     (j-compress-node*
+      `(,(concat prefix suf) ,@nodes)))
+    
+    ;; (`(,prefix ,child)
+    ;;  (j-compress-node* (j-node-prepend-string child prefix)))
+
+    (`(,prefix . ,nodes)
+     `(,prefix ,@(mapcar #'j-compress-node* nodes)))
+                            
+    (err (error "Invalid node %s" err))))
+
+
+(defun j-nodes-compress (nodes)
+  "Compress NODES by merging parents of one child with their children."
+  (mapcar #'j-compress-node* nodes))
+
+
+(defun j-nodes-disband (nodes keep-key)
+  "Disband NODES when KEEP-KEY on the discendent atoms gives different results."
+  (letrec ((j-extract-properties
+            (lambda (node)
+              (pcase node
+                ((pred atom)
+                 ;; (props node)
+                 `(,(funcall keep-key node) ,node))
+                
+                (`(,prefix . ,nodes)
+                 (let* ((prop+nodes   (mapcar j-extract-properties nodes))
+                        (prop         (mapcar #'car prop+nodes))
+                        (nodes        (mapcan #'cdr prop+nodes))
+                        (grouped-prop (cl-reduce (lambda (a b)
+                                                   (and (equal a b) a))
+                                                 prop)))
+                   (if grouped-prop
+                       ;; (props node)
+                       `(,grouped-prop (,prefix ,@nodes))
+                     ;; (props node*)
+                     `(nil ,@(mapcar (lambda (node)
+                                     (j-node-prepend-string node prefix))
+                                   nodes)))))))))
+    (let* ((prop+nodes (mapcar j-extract-properties nodes))
+           (nodes      (mapcan #'cdr prop+nodes)))
+      (j-nodes-compress nodes))))
+
+
+;; (defvar *j-tst* nil)
+
+;; (setf *j-tst* nil
+;;       *j-tst* (j-nodes-push *j-tst* "pippo"    'dog)
+;;       *j-tst* (j-nodes-push *j-tst* "pluto"    'dog)
+;;       *j-tst* (j-nodes-push *j-tst* "paperino" 'duck)
+;;       *j-tst* (j-nodes-push *j-tst* "paperone" 'duck)
+;;       *j-tst* (j-nodes-push *j-tst* "ciccio"   'duck)
+;;       *j-tst* (j-nodes-push *j-tst* "pitagora" 'duck))
+
+;; (setf *j-tst* (j-nodes-compress *j-tst*))
+
+;; (j-nodes-disband *j-tst* #'identity)
+;; (j-nodes-filter *j-tst* (lambda (p) (eq p 'dog)))
+
+(defun j-nodes-filter (nodes predicate)
+  "Keep only NODES where PREDICATE is t."
+  (cl-flet ((filter-node
+             (node)
+             (pcase node
+               ((pred atom)
+                (and (funcall predicate node) node))
+               (`(,prefix . ,nodes)
+                (let ((nodes (j-nodes-filter nodes
+                                             predicate)))
+                  (and nodes (cons prefix
+                                  nodes)))))))
+    (seq-filter #'identity
+                (mapcar #'filter-node nodes))))
+
+(defun j-nodes-flatten (nodes)
+  "Traverse NODES recursively and accumulate atoms into a flatten alist."
+  (let ((alst))
+    (letrec ((collect-node
+              (lambda (node prefix)
+                (pcase node
+                  ((pred atom)
+                   (list node))
+                  
+                  (`(,suffix . ,nodes)
+                   (let* ((prefix (concat prefix suffix))
+                          (atoms (seq-mapcat
+                                  (lambda (node)
+                                    (funcall collect-node
+                                             node
+                                             prefix))
+                                  nodes))
+                          (sorted-atoms
+                           (sort atoms #'string-lessp)))
+                     
+                     (push `(,prefix ,@sorted-atoms) alst)
+                     sorted-atoms))))))
+      (dolist (node nodes)
+        (funcall collect-node node ""))
+      alst)))
+
+(defun j-nodes-mutate (nodes mutator)
+  (let ((mutate-node
+         (lambda (node)
+           (pcase node
+             ((pred atom) (funcall mutator node))
+             (`(,ch . ,nodes) (j-nodes-mutate nodes mutator))))))
+    (mapcar 'mutate-node nodes)))
+
+(defun j-nodes-decorate (alst)
+  "Append `*' to keys with more than one value in ALST."
+  (mapcar (lambda (kv)
+            (pcase kv
+              ((pred atom) kv)
+              (`(,k ,v) kv)
+              (`(,k . ,v) `(,(concat k "*") ,@v))))
+          alst))
+
+(defun jack-running-p ()
+  "Check if jack is running."
+  (pcase (process-lines "jack_wait" "-c")
+    (`("running") t)
+    (any nil)))
+
 (defun jack-lsp ()
-  "Update the port alist parsing the output of jack_lsp."
-  (let ((ports) (current-port (make-empty-port)))
-    (dolist (line (reverse (process-lines "jack_lsp" "-ctp")))
+  "Update the port tree parsing the output of jack_lsp."
+  (let ((current-port nil)
+        (tree (list)))
+    (clrhash *j-ports*)
+    (dolist (line (process-lines "jack_lsp" "-ctp"))
       (cond
+       ;; port properties
        ((string-match "^[ \t]+properties: \\(.*\\)" line)
-        (setf (alist-get 'properties current-port)
-              (mapcar 'intern
+        (setf (jack-port-properties current-port)
+              (mapcar #'intern
                       (split-string (replace-match "\\1" nil nil line) "," t))))
 
+       ;; port connection
        ((string-match "^ \\{3\\}\\(.*\\)" line)
-	(push (replace-match "\\1" nil nil line)
-              (alist-get 'connections current-port)))
-                   
+        (push (replace-match "\\1" nil nil line)
+              (jack-port-connections current-port)))
+
+       ;; port type
        ((string-match "^[ \t]+\\(.*\\)" line)
-        (setf (alist-get 'type current-port)
+        (setf (jack-port-type current-port)
               (replace-match "\\1" nil nil line)))
 
-       ;; port name (this is the last element parsed when the output
-       ;; of jack_lsp is reverted)
+       ;; port name (sets current-port)
        (t
-        (setf (alist-get 'name current-port) line)
-        (push current-port ports)
-        (setq current-port (make-empty-port)))))
-    (setf *jack-ports* ports)))
-
-
-(defun jack-get-port (name)
-  "Retrieve a port by NAME."
-  (seq-find (lambda (prt) (equal (jack-port-name prt) name))
-            *jack-ports*))
+        (cl-destructuring-bind (client port)
+            (split-string line ":")
+          (setf current-port line)
+          (puthash current-port (make-empty-port) *j-ports*)
+          (setf (jack-port-name current-port)  port
+                (jack-port-client current-port) client)
+          (setf tree (j-nodes-push tree current-port current-port))))))
+    (setf *j-tree* (j-nodes-compress tree))))
 
 ;;;###autoload
-(defun jack-connect (port1 port2)
-  "Connect PORT1 to PORT2."
+(defun jack-connect (p1s p2s)
+  "Connect port selection P1S with port selection P2S."
   (interactive
    (progn
      (jack-lsp)
-     (let ((from-ports (jack-port-filter #'jack-port-output-p)))
-       (if from-ports
-	   (let* ((from-port-string (completing-read "Output port: " (mapcar #'jack-port-name from-ports)))
-		  (from-port        (jack-get-port from-port-string))
-                  (to-ports         (jack-port-filter (jack-port-can-connect-p from-port)))
-		  (to-port-string   (completing-read
-		        	     (format "Connect %s (%s) to: " from-port-string (alist-get 'type from-port))
-		        	     (mapcar #'jack-port-name to-ports))))
-	     (list from-port-string to-port-string))
-         (progn (message "No port can be connected")
-	        (list nil nil))))))
-  (when port1
-    (call-process "jack_connect" nil nil nil port1 port2)))
+     (let* ((node1 (-> *j-tree*
+                      (j-nodes-filter #'jack-port-output-p)
+                      (j-nodes-disband (lambda (p)
+                                         (list
+                                          (jack-port-client p)
+                                          (jack-port-type p))))
+                      (j-nodes-compress)
+                      (j-nodes-flatten)
+                      (j-nodes-decorate)))
+            (sel1  (completing-read "connect: " node1))
+            (p1s   (cdr (assoc sel1 node1)))
+            (type  (jack-port-type (car p1s)))
+            (node2 (-> *j-tree*
+                      (j-nodes-filter #'jack-port-input-p)
+                      (j-nodes-filter (lambda (p)
+                                        (string= (jack-port-type p) type)))
+                      (j-nodes-compress)
+                      (j-nodes-flatten)
+                      (j-nodes-decorate)))
+            (sel2  (completing-read (format "connect %s to: "
+                                            sel1)
+                                    node2)))
+       (list p1s (cdr (assoc sel2 node2))))))
+  (when p1s
+    (cl-mapc (lambda (p1 p2)
+               (call-process "jack_connect" nil nil nil
+                             p1
+                             p2))
+             p1s
+             p2s)))
+
+
+(defun jack-merge-connections (ports)
+  "Return the union of the connections of PORTS."
+  (cl-reduce #'cl-union
+             (mapcar (lambda (p) (jack-port-connections p))
+                     ports)))
 
 ;;;###autoload
-(defun jack-disconnect (port1 port2)
-  "Disconnect the two connected ports PORT1 and PORT2."
+(defun jack-disconnect (p1s p2s)
+  "Disconnect port set P1S from port set P2S."
   (interactive
    (progn
      (jack-lsp)
-     (let ((from-ports (jack-port-filter (lambda (p) (alist-get 'connections p)))))
-       (if from-ports
-	   (let* ((from-port-string (completing-read "Disconnect port: " (mapcar #'jack-port-name from-ports)))
-		  (from-port (jack-get-port from-port-string))
-		  (to-ports (alist-get 'connections from-port))
-		  (to-port-string (completing-read "From port: " to-ports)))
-	     (list from-port-string to-port-string))
-         (progn (message "No port can be disconnected")
-	        (list nil nil))))))
-  (when port1
-    (call-process "jack_disconnect" nil nil nil port1 port2)))
-
-;;;###autoload
-(defun jack-disconnect-all-from (from connections)
-  "Disconnect all the ports connected to FROM port.
-CONNECTIONS is the list of ports connected to FROM."
-  (interactive
-   (progn
-     (jack-lsp)
-     (let ((from-ports (jack-port-filter (lambda (p) (alist-get 'connections p)))))
-       (if from-ports
-	   (let ((from-port-string (completing-read "Disconnect all connections from port: "
-					     (mapcar #'jack-port-name from-ports))))
-	     (if (yes-or-no-p (format "Disconnecting all connections from %s. Are you sure"
-				      from-port-string))
-	         (list from-port-string (alist-get 'connections (jack-port-get from-port-string)))
-	       (list nil nil)))
-         (progn (message "No port can be disconnected")
-	        (list nil nil))))))
-  (when from
-    (dolist (to connections)
-      (jack-disconnect from to))))
+     (let* ((node1 (-> *j-tree*
+                      (j-nodes-disband (lambda (p) (jack-port-client p)))
+                      (j-nodes-filter #'jack-port-connected-p)
+                      (j-nodes-compress)
+                      (j-nodes-flatten)
+                      (j-nodes-decorate)))
+            (sel1  (completing-read "disconnect jack port(s): " node1))
+            (p1s   (cdr (assoc sel1 node1)))
+            ;; make an alst with p1s
+            (node2 (-> (jack-merge-connections p1s)
+                      (make-jack-nodes)
+                      (j-nodes-compress)
+                      (j-nodes-flatten)
+                      (j-nodes-decorate)))
+            (sel2  (completing-read (format "disconnect %s from: "
+                                            sel1)
+                                    node2))
+            (p2s   (cdr (assoc sel2 node2))))
+       (list p1s p2s))))
+  (when p1s
+    (dolist (p1 p1s)
+      (dolist (p2 p2s)
+        (when (member p2 p2s)
+          (call-process "jack_disconnect" nil nil nil
+                                    p1 p2))))))
 
 (provide 'jack-connect)
-
-;; jack-connect.el ends here
+;;; jack-connect.el ends here
