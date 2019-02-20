@@ -175,22 +175,6 @@
            (nodes      (mapcan #'cdr prop+nodes)))
       (j-nodes-compress nodes))))
 
-
-;; (defvar *j-tst* nil)
-
-;; (setf *j-tst* nil
-;;       *j-tst* (j-nodes-push *j-tst* "pippo"    'dog)
-;;       *j-tst* (j-nodes-push *j-tst* "pluto"    'dog)
-;;       *j-tst* (j-nodes-push *j-tst* "paperino" 'duck)
-;;       *j-tst* (j-nodes-push *j-tst* "paperone" 'duck)
-;;       *j-tst* (j-nodes-push *j-tst* "ciccio"   'duck)
-;;       *j-tst* (j-nodes-push *j-tst* "pitagora" 'duck))
-
-;; (setf *j-tst* (j-nodes-compress *j-tst*))
-
-;; (j-nodes-disband *j-tst* #'identity)
-;; (j-nodes-filter *j-tst* (lambda (p) (eq p 'dog)))
-
 (defun j-nodes-filter (nodes predicate)
   "Keep only NODES where PREDICATE is t."
   (cl-flet ((filter-node
