@@ -91,7 +91,7 @@
 ;;; node: atom || (ch node ...))
 ;;; nodes|tree: (node ...)
 
-(defun j-nodes-push (nodes keystr elem)
+(defun j--nodes-push (nodes keystr elem)
   "Add the atomic value ELEM to NODES, indexed by KEYSTR."
   (if (string-empty-p keystr)
       ;; terminal node. elem must be atomic
@@ -103,7 +103,7 @@
         ;; found a node
         (`(,_ . ,children)
          (setf (cdr matching-node)
-               (j-nodes-push children
+               (j--nodes-push children
                              rest-string
                              elem))
          
@@ -112,7 +112,7 @@
         (_
          (let ((new-elt
                 `(,first-char
-                  ,@(j-nodes-push (list)
+                  ,@(j--nodes-push (list)
                                   rest-string
                                   elem))))
            (cons new-elt nodes)))))))
@@ -121,11 +121,11 @@
   "Construct a jack-nodes tree from STRINGS."
   (let ((tree))
     (dolist (str strings)
-      (setf tree (j-nodes-push tree str str)))
-    (j-nodes-compress tree)))
+      (setf tree (j--nodes-push tree str str)))
+    (j--nodes-compress tree)))
 
 
-(defun j-node-prepend-string (node prefix)
+(defun j--node-prepend-string (node prefix)
   "Prepend a PREFIX to the string of a NODE."
   (pcase node
     ((pred atom) node)
@@ -133,35 +133,34 @@
     (`(,suffix . ,nodes)
      `(,(concat prefix suffix) ,@nodes))))
 
-
 ;;; TODO: make this an inner function?
-(defun j-compress-node* (node)
+(defun j--compress-node* (node)
   (pcase node
     ;; only one child
     ((pred atom) node)
     
     (`(,prefix (,suf . ,nodes))
-     (j-compress-node*
+     (j--compress-node*
       `(,(concat prefix suf) ,@nodes)))
     
     ;; (`(,prefix ,child)
-    ;;  (j-compress-node* (j-node-prepend-string child prefix)))
+    ;;  (j-compress-node* (j--node-prepend-string child prefix)))
 
     (`(,prefix . ,nodes)
-     `(,prefix ,@(mapcar #'j-compress-node* nodes)))
+     `(,prefix ,@(mapcar #'j--compress-node* nodes)))
                             
     (err (error "Invalid node %s" err))))
 
 
-(defun j-nodes-compress (nodes)
+(defun j--nodes-compress (nodes)
   "Compress NODES by merging parents of one child with their children."
-  (mapcar #'j-compress-node* nodes))
+  (mapcar #'j--compress-node* nodes))
 
 
-(defun j-nodes-disband (nodes key)
+(defun j--nodes-disband (nodes key)
   "Disband NODES when KEY on the discendent atoms gives different results."
   ;; disband: ("a" ("b") ("c")) => (("ab") ("ac"))
-  (letrec ((j-extract-properties
+  (letrec ((extract-properties
             (lambda (node)
               (pcase node
                 ((pred atom)
@@ -169,7 +168,7 @@
                  `(,(funcall key node) ,node))
                 
                 (`(,prefix . ,nodes)
-                 (let* ((prop+nodes   (mapcar j-extract-properties nodes))
+                 (let* ((prop+nodes   (mapcar extract-properties nodes))
                         (prop         (mapcar #'car prop+nodes))
                         (nodes        (mapcan #'cdr prop+nodes))
                         (grouped-prop (cl-reduce (lambda (a b)
@@ -180,13 +179,13 @@
                        `(,grouped-prop (,prefix ,@nodes))
                      ;; (props node*)
                      `(nil ,@(mapcar (lambda (node)
-                                     (j-node-prepend-string node prefix))
+                                     (j--node-prepend-string node prefix))
                                    nodes)))))))))
-    (let* ((prop+nodes (mapcar j-extract-properties nodes))
+    (let* ((prop+nodes (mapcar extract-properties nodes))
            (nodes      (mapcan #'cdr prop+nodes)))
-      (j-nodes-compress nodes))))
+      (j--nodes-compress nodes))))
 
-(defun j-nodes-filter (nodes predicate)
+(defun j--nodes-filter (nodes predicate)
   "Keep only NODES where PREDICATE is t."
   (cl-flet ((filter-node
              (node)
@@ -194,14 +193,14 @@
                ((pred atom)
                 (and (funcall predicate node) node))
                (`(,prefix . ,nodes)
-                (let ((nodes (j-nodes-filter nodes
+                (let ((nodes (j--nodes-filter nodes
                                              predicate)))
                   (and nodes (cons prefix
                                   nodes)))))))
     (seq-filter #'identity
                 (mapcar #'filter-node nodes))))
 
-(defun j-nodes-flatten (nodes)
+(defun j--nodes-flatten (nodes)
   "Traverse NODES recursively and accumulate atoms into a flatten alist."
   (let ((alst))
     (letrec ((collect-node
@@ -227,16 +226,16 @@
         (funcall collect-node node ""))
       alst)))
 
-(defun j-nodes-mutate (nodes mutator)
+(defun j--nodes-mutate (nodes mutator)
   "Mutate terminal elements in NODES by applying the function of one argument MUTATOR."
   (let ((mutate-node
          (lambda (node)
            (pcase node
              ((pred atom) (funcall mutator node))
-             (`(,ch . ,nodes) (j-nodes-mutate nodes mutator))))))
+             (`(,ch . ,nodes) (j--nodes-mutate nodes mutator))))))
     (mapcar 'mutate-node nodes)))
 
-(defun j-nodes-decorate (alst)
+(defun j--nodes-decorate (alst)
   "Append `*' to keys with more than one value in ALST."
   (mapcar (lambda (kv)
             (pcase kv
@@ -280,8 +279,8 @@
             (split-string line ":")
           (setf current-port line)
           (j--make-port current-port client port)
-          (setf tree (j-nodes-push tree current-port current-port))))))
-    (setf *j-tree* (j-nodes-compress tree))))
+          (setf tree (j--nodes-push tree current-port current-port))))))
+    (setf *j-tree* (j--nodes-compress tree))))
 
 ;;;###autoload
 (defun jack-connect (p1s p2s)
@@ -290,24 +289,24 @@
    (progn
      (jack-lsp)
      (let* ((node1 (-> *j-tree*
-                      (j-nodes-filter #'jack-port-output-p)
-                      (j-nodes-disband (lambda (p)
+                      (j--nodes-filter #'jack-port-output-p)
+                      (j--nodes-disband (lambda (p)
                                          (list
                                           (jack-port-client p)
                                           (jack-port-type p))))
-                      (j-nodes-compress)
-                      (j-nodes-flatten)
-                      (j-nodes-decorate)))
+                      (j--nodes-compress)
+                      (j--nodes-flatten)
+                      (j--nodes-decorate)))
             (sel1  (completing-read "connect: " node1))
             (p1s   (cdr (assoc sel1 node1)))
             (type  (jack-port-type (car p1s)))
             (node2 (-> *j-tree*
-                      (j-nodes-filter #'jack-port-input-p)
-                      (j-nodes-filter (lambda (p)
+                      (j--nodes-filter #'jack-port-input-p)
+                      (j--nodes-filter (lambda (p)
                                         (string= (jack-port-type p) type)))
-                      (j-nodes-compress)
-                      (j-nodes-flatten)
-                      (j-nodes-decorate)))
+                      (j--nodes-compress)
+                      (j--nodes-flatten)
+                      (j--nodes-decorate)))
             (sel2  (completing-read (format "connect %s to: "
                                             sel1)
                                     node2)))
@@ -321,7 +320,7 @@
              p2s)))
 
 
-(defun jack-merge-connections (ports)
+(defun j--merge-connections (ports)
   "Return the union of the connections of PORTS."
   (cl-reduce #'cl-union
              (mapcar #'jack-port-connections ports)))
@@ -333,19 +332,19 @@
    (progn
      (jack-lsp)
      (let* ((node1 (-> *j-tree*
-                      (j-nodes-disband #'jack-port-client)
-                      (j-nodes-filter #'jack-port-connected-p)
-                      (j-nodes-compress)
-                      (j-nodes-flatten)
-                      (j-nodes-decorate)))
+                      (j--nodes-disband #'jack-port-client)
+                      (j--nodes-filter #'jack-port-connected-p)
+                      (j--nodes-compress)
+                      (j--nodes-flatten)
+                      (j--nodes-decorate)))
             (sel1  (completing-read "disconnect jack port(s): " node1))
             (p1s   (cdr (assoc sel1 node1)))
             ;; make an alst with p1s
-            (node2 (-> (jack-merge-connections p1s)
+            (node2 (-> (j--merge-connections p1s)
                       (make-jack-nodes)
-                      (j-nodes-compress)
-                      (j-nodes-flatten)
-                      (j-nodes-decorate)))
+                      (j--nodes-compress)
+                      (j--nodes-flatten)
+                      (j--nodes-decorate)))
             (sel2  (completing-read (format "disconnect %s from: "
                                             sel1)
                                     node2))
@@ -356,7 +355,7 @@
       (dolist (p2 p2s)
         (when (member p2 p2s)
           (call-process "jack_disconnect" nil nil nil
-                                    p1 p2))))))
+                        p1 p2))))))
 
 (provide 'jack-connect)
 ;;; jack-connect.el ends here
