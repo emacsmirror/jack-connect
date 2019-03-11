@@ -57,7 +57,9 @@
            (cons new-elt nodes)))))))
 
 (defun make-j--nodes (strings &optional atoms)
-  "Construct a jack-nodes tree from a list of STRINGS and an optional corresponding list ot ATOMS.   If atoms are not provided the strings will be used as atoms."
+  "Construct a jack-nodes tree from a list of STRINGS and an
+optional corresponding list ot ATOMS.  If atoms are not provided
+the strings will be used as atoms."
   (let ((tree)
         (atoms (or atoms strings )))
     (cl-loop for str in strings
@@ -169,7 +171,7 @@ Recursively accumulate atoms descendent from node into each node."
       alst)))
 
 (defun j--nodes-mutate (nodes mutator)
-  "Mutate terminal elements in NODES by applying the function of one argument MUTATOR."
+  "Mutate NODES by applying the MUTATOR to each terminal node."
   (let ((mutate-node
          (lambda (node)
            (pcase node
@@ -247,39 +249,42 @@ Recursively accumulate atoms descendent from node into each node."
   (jack-port-connections port))
 
 (defun jack-running-p ()
-  "Check if jack is running."
-  (pcase (process-lines "jack_wait" "-c")
+  "Return t if jack is started."
+  (pcase (process-lines "jack_wait" "-c" "-s" "default")
     (`("running") t)
-    (any nil)))
+    (`("not running") nil)))
 
 (defun jack-lsp ()
   "Update the port table parsing the output of jack_lsp."
-  (let ((current-port nil))
-    (clrhash jack--port-table)
-    (dolist (line (process-lines "jack_lsp" "-ctp"))
-      (cond
-       ;; port properties
-       ((string-match "^[ \t]+properties: \\(.*\\)" line)
-        (setf (jack-port-properties current-port)
-              (mapcar #'intern
-                      (split-string (replace-match "\\1" nil nil line) "," t))))
+  (if (not (jack-running-p))
+      (error "Jack default server is not active.")
+    (let ((current-port nil))
+      (clrhash jack--port-table)
+      (dolist (line (process-lines "jack_lsp" "-ctp"))
+        (cond
+         ;; port properties
+         ((string-match "^[ \t]+properties: \\(.*\\)" line)
+          (setf (jack-port-properties current-port)
+                (mapcar #'intern
+                        (split-string (replace-match "\\1" nil nil line) "," t))))
 
-       ;; port connection
-       ((string-match "^ \\{3\\}\\(.*\\)" line)
-        (push (replace-match "\\1" nil nil line)
-              (jack-port-connections current-port)))
+         ;; port connection
+         ((string-match "^ \\{3\\}\\(.*\\)" line)
+          (push (replace-match "\\1" nil nil line)
+                (jack-port-connections current-port)))
 
-       ;; port type
-       ((string-match "^[ \t]+\\(.*\\)" line)
-        (setf (jack-port-type current-port)
-              (replace-match "\\1" nil nil line)))
+         ;; port type
+         ((string-match "^[ \t]+\\(.*\\)" line)
+          (setf (jack-port-type current-port)
+                (replace-match "\\1" nil nil line)))
 
-       ;; port name (sets current-port)
-       (t
-        (cl-destructuring-bind (client port)
-            (split-string line ":")
-          (setf current-port line)
-          (jack--make-port current-port client port)))))))
+         ;; port name (sets current-port)
+         (t
+          (cl-destructuring-bind (client port)
+              (split-string line ":")
+            (setf current-port line)
+            (jack--make-port current-port client port))))))))
+
 
 ;;;###autoload
 (defun jack-connect (p1s p2s)
