@@ -29,42 +29,42 @@
 (require 'seq)
 
 
-(defun make-pfx-tree (strings)
+(defun make--jtrie (strings)
   "Construct a prefix tree from a list of STRINGS."
-  (let ((tree))
+  (let ((trie))
     (cl-loop for str in strings
              do
-             (setf tree (pfx-tree-push tree str str)))
-    (pfx-tree-compress tree)))
+             (setf trie (jtrie--push trie str str)))
+    (jtrie--compress trie)))
 
 
-(defun pfx-tree-push (nodes keystr elem)
-  "Add  ELEM to NODES, indexed by KEYSTR."
+(defun jtrie--push (trie keystr elem)
+  "Add  ELEM to TRIE, indexed by KEYSTR."
   (if (string-empty-p keystr)
       ;; terminal node. elem must be atomic
-      (cons elem nodes)
+      (cons elem trie)
     (let* ((first-char    (substring keystr 0 1))
            (rest-string   (substring keystr 1))
-           (matching-node (assoc first-char nodes #'string=)))
+           (matching-node (assoc first-char trie #'string=)))
       (pcase matching-node
         ;; found a node
         (`(,_ . ,children)
          (setf (cdr matching-node)
-               (pfx-tree-push children
+               (jtrie--push children
                              rest-string
                              elem))
          
-         nodes)
+         trie)
         ;; no matching node found
         (_
          (let ((new-elt
                 `(,first-char
-                  ,@(pfx-tree-push (list)
+                  ,@(jtrie--push (list)
                                   rest-string
                                   elem))))
-           (cons new-elt nodes)))))))
+           (cons new-elt trie)))))))
 
-(defun pfx-tree-prepend-string-to-node (node str)
+(defun jtrie--prepend-string-to-node (node str)
   "Prepend STR to prefix of a NODE."
   (pcase node
     ((pred atom) node)
@@ -72,7 +72,7 @@
     (`(,suffix . ,nodes)
      `(,(concat str suffix) ,@nodes))))
 
-(defun pfx-tree-compress-node (node)
+(defun jtrie--compress-node (node)
   "Unify NODE with child if node has only a child."
   ;; E.g. (("a" ("b" ("c" "d")))) -> (("ab" ("c" "d")))
   (pcase node
@@ -80,23 +80,23 @@
 
     ;; single child
     (`(,prefix (,suf . ,nodes))
-     (pfx-tree-compress-node
+     (jtrie--compress-node
       `(,(concat prefix suf) ,@nodes)))
 
     ;; multiple children
     (`(,prefix . ,nodes)
-     `(,prefix ,@(mapcar #'pfx-tree-compress-node nodes)))
+     `(,prefix ,@(mapcar #'jtrie--compress-node nodes)))
                             
     (err (error "Invalid node %s" err))))
 
 
-(defun pfx-tree-compress (nodes)
-  "Unify NODES having one child with their children."
-  (mapcar #'pfx-tree-compress-node nodes))
+(defun jtrie--compress (trie)
+  "Compress TRIE by unifying nodes having one child with their children."
+  (mapcar #'jtrie--compress-node trie))
 
 
-(defun pfx-tree-disband (nodes key)
-  "Disband NODES when applying KEY on children gives different results."
+(defun jtrie--disband (trie key)
+  "Disband nodes in TRIE when applying KEY on children gives different results."
   ;; E.g.: (("a" ("b") ("c")) => (("ab") ("ac"))
   (letrec ((extract-properties
             (lambda (node)
@@ -105,41 +105,41 @@
                  ;; (props node)
                  `(,(funcall key node) ,node))
                 
-                (`(,prefix . ,nodes)
-                 (let* ((prop+nodes   (mapcar extract-properties nodes))
+                (`(,prefix . ,trie)
+                 (let* ((prop+nodes   (mapcar extract-properties trie))
                         (prop         (mapcar #'car prop+nodes))
-                        (nodes        (mapcan #'cdr prop+nodes))
+                        (trie         (mapcan #'cdr prop+nodes))
                         (grouped-prop (cl-reduce (lambda (a b)
                                                    (and (equal a b) a))
                                                  prop)))
                    (if grouped-prop
                        ;; (props node)
-                       `(,grouped-prop (,prefix ,@nodes))
+                       `(,grouped-prop (,prefix ,@trie))
                      ;; (props node*)
                      `(nil ,@(mapcar (lambda (node)
-                                     (pfx-tree-prepend-string-to-node node prefix))
-                                   nodes)))))))))
-    (let* ((prop+nodes (mapcar extract-properties nodes))
-           (nodes      (mapcan #'cdr prop+nodes)))
-      (pfx-tree-compress nodes))))
+                                     (jtrie--prepend-string-to-node node prefix))
+                                   trie)))))))))
+    (let* ((prop+nodes (mapcar extract-properties trie))
+           (trie       (mapcan #'cdr prop+nodes)))
+      (jtrie--compress trie))))
 
-(defun pfx-tree-filter (nodes predicate)
-  "Keep only NODES where PREDICATE is t."
+(defun jtrie--filter (trie predicate)
+  "Keep only nodes in TRIE where PREDICATE is t."
   (cl-flet ((filter-node
              (node)
              (pcase node
                ((pred atom)
                 (and (funcall predicate node) node))
                (`(,prefix . ,nodes)
-                (let ((nodes (pfx-tree-filter nodes
+                (let ((nodes (jtrie--filter nodes
                                               predicate)))
                   (and nodes (cons prefix
                                  nodes)))))))
     (seq-filter #'identity
-                (mapcar #'filter-node nodes))))
+                (mapcar #'filter-node trie))))
 
-(defun pfx-tree-flatten (nodes)
-  "Transform NODES into an alist.
+(defun jtrie--flatten (trie)
+  "Transform TRIE into an alist.
 Recursively accumulate atoms descendent from node into each node."
   ;; (("ab" ("c" "d"))) -> (("ab" "abc" "abd") ("abc" "abc") ("abd" "abd"))
   (let ((alst))
@@ -149,33 +149,33 @@ Recursively accumulate atoms descendent from node into each node."
                   ((pred atom)
                    (list node))
                   
-                  (`(,suffix . ,nodes)
+                  (`(,suffix . ,trie)
                    (let* ((prefix (concat prefix suffix))
                           (atoms (seq-mapcat
                                   (lambda (node)
                                     (funcall collect-node
                                              node
                                              prefix))
-                                  nodes))
+                                  trie))
                           (sorted-atoms
                            (sort atoms #'string-lessp)))
                      
                      (push `(,prefix ,@sorted-atoms) alst)
                      sorted-atoms))))))
-      (dolist (node nodes)
+      (dolist (node trie)
         (funcall collect-node node ""))
       alst)))
 
-(defun pfx-tree-mutate (nodes mutator)
-  "Mutate NODES by applying the MUTATOR to each terminal node."
+(defun jtrie--mutate (trie mutator)
+  "Mutate TRIE by applying the MUTATOR to each terminal node."
   (let ((mutate-node
          (lambda (node)
            (pcase node
              ((pred atom) (funcall mutator node))
-             (`(,ch . ,nodes) (pfx-tree-mutate nodes mutator))))))
-    (mapcar mutate-node nodes)))
+             (`(,ch . ,trie) (jtrie--mutate trie mutator))))))
+    (mapcar mutate-node trie)))
 
-(defun pfx-tree-decorate-alist (alst)
+(defun jtrie--decorate-alist (alst)
   "Append `*' to keys with more than one value in ALST."
   ;; (("ab" "abc" "abd")) -> (("ab*" "abc" "abd"))
   (mapcar (lambda (kv)
@@ -185,12 +185,12 @@ Recursively accumulate atoms descendent from node into each node."
               (`(,k . ,v) `(,(concat k "*") ,@v))))
           alst))
 
-(defun pfx-tree->alst (nodes)
-  "Transform the prefix-tree NODES into an alist."
-  (-> nodes
-     (pfx-tree-compress)
-     (pfx-tree-flatten)
-     (pfx-tree-decorate-alist)))
+(defun jtrie-->alst (trie)
+  "Transform TRIE into an alist."
+  (-> trie
+     (jtrie--compress)
+     (jtrie--flatten)
+     (jtrie--decorate-alist)))
 
 
 
@@ -299,29 +299,29 @@ Recursively accumulate atoms descendent from node into each node."
    (progn
      (jack-lsp)
      (let* ((tree   (-> (jack--list-ports)
-                       (make-pfx-tree)))
+                       (make--jtrie)))
             (node1 (-> tree
-                      (pfx-tree-filter
+                      (jtrie--filter
                        (if current-prefix-arg
                            #'jack-port-input-p
                          #'jack-port-output-p))
-                      (pfx-tree-disband (lambda (p)
+                      (jtrie--disband (lambda (p)
                                           (list
                                            (jack-port-client p)
                                            (jack-port-type p))))
-                      (pfx-tree->alst)))
+                      (jtrie-->alst)))
             (sel1  (completing-read "connect: " node1))
             (p1s   (cdr (assoc sel1 node1)))
             (type  (jack-port-type (car p1s)))
             (node2 (-> tree
-                      (pfx-tree-filter
+                      (jtrie--filter
                        (if current-prefix-arg
                            #'jack-port-output-p
                          #'jack-port-input-p))
-                      (pfx-tree-filter
+                      (jtrie--filter
                        (lambda (p)
                          (string= (jack-port-type p) type)))
-                      (pfx-tree->alst)))
+                      (jtrie-->alst)))
             (sel2  (completing-read (format "connect %s to: "
                                             sel1)
                                     node2)))
@@ -347,16 +347,16 @@ Recursively accumulate atoms descendent from node into each node."
    (progn
      (jack-lsp)
      (let* ((node1 (-> (jack--list-ports)
-                      (make-pfx-tree)
-                      (pfx-tree-disband #'jack-port-client)
-                      (pfx-tree-filter #'jack-port-connected-p)
-                      (pfx-tree->alst)))
+                      (make--jtrie)
+                      (jtrie--filter #'jack-port-connected-p)
+                      (jtrie--disband #'jack-port-client)
+                      (jtrie-->alst)))
             (sel1  (completing-read "disconnect jack port(s): " node1))
             (p1s   (cdr (assoc sel1 node1)))
             ;; make an alst with p1s
             (node2 (-> (jack--merge-connections p1s)
-                      (make-pfx-tree)
-                      (pfx-tree->alst)))
+                      (make--jtrie)
+                      (jtrie-->alst)))
             (sel2  (completing-read (format "disconnect %s from: "
                                             sel1)
                                     node2))
