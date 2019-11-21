@@ -301,19 +301,26 @@ Recursively accumulate atoms descendent from node into each node."
      (let* ((tree   (-> (jack--list-ports)
                        (make-pfx-tree)))
             (node1 (-> tree
-                      (pfx-tree-filter #'jack-port-output-p)
+                      (pfx-tree-filter
+                       (if current-prefix-arg
+                           #'jack-port-input-p
+                         #'jack-port-output-p))
                       (pfx-tree-disband (lambda (p)
-                                         (list
-                                          (jack-port-client p)
-                                          (jack-port-type p))))
+                                          (list
+                                           (jack-port-client p)
+                                           (jack-port-type p))))
                       (pfx-tree->alst)))
             (sel1  (completing-read "connect: " node1))
             (p1s   (cdr (assoc sel1 node1)))
             (type  (jack-port-type (car p1s)))
             (node2 (-> tree
-                      (pfx-tree-filter #'jack-port-input-p)
-                      (pfx-tree-filter (lambda (p)
-                                         (string= (jack-port-type p) type)))
+                      (pfx-tree-filter
+                       (if current-prefix-arg
+                           #'jack-port-output-p
+                         #'jack-port-input-p))
+                      (pfx-tree-filter
+                       (lambda (p)
+                         (string= (jack-port-type p) type)))
                       (pfx-tree->alst)))
             (sel2  (completing-read (format "connect %s to: "
                                             sel1)
