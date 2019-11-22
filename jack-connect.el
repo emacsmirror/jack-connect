@@ -298,26 +298,30 @@ Recursively accumulate atoms descendent from node into each node."
   (interactive
    (progn
      (jack-lsp)
-     (let* ((tree   (-> (jack--list-ports)
+     (let* ((from (if current-prefix-arg 'input 'output))
+            (tree   (-> (jack--list-ports)
                        (make--jtrie)))
             (node1 (-> tree
                       (jtrie--filter
-                       (if current-prefix-arg
-                           #'jack-port-input-p
-                         #'jack-port-output-p))
+                       (case from
+                         (input  #'jack-port-input-p)
+                         (output #'jack-port-output-p)))
                       (jtrie--disband (lambda (p)
                                           (list
                                            (jack-port-client p)
                                            (jack-port-type p))))
                       (jtrie-->alst)))
-            (sel1  (completing-read "connect: " node1))
+            (sel1
+             (if node1
+                 (completing-read "connect: " node1)
+               (error (format "There are no %s ports registered" from))))
             (p1s   (cdr (assoc sel1 node1)))
             (type  (jack-port-type (car p1s)))
             (node2 (-> tree
                       (jtrie--filter
-                       (if current-prefix-arg
-                           #'jack-port-output-p
-                         #'jack-port-input-p))
+                       (case from
+                         (input  #'jack-port-output-p)
+                         (output #'jack-port-input-p)))
                       (jtrie--filter
                        (lambda (p)
                          (string= (jack-port-type p) type)))
@@ -351,7 +355,10 @@ Recursively accumulate atoms descendent from node into each node."
                       (jtrie--filter #'jack-port-connected-p)
                       (jtrie--disband #'jack-port-client)
                       (jtrie-->alst)))
-            (sel1  (completing-read "disconnect jack port(s): " node1))
+            (sel1
+             (if node1
+                 (completing-read "disconnect jack port(s): " node1)
+               (error "There are no jack connections")))
             (p1s   (cdr (assoc sel1 node1)))
             ;; make an alst with p1s
             (node2 (-> (jack--merge-connections p1s)
