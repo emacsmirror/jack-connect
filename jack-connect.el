@@ -407,18 +407,20 @@ Recursively accumulate atoms descendent from node into each node."
     collect   (cons p c))))
 
 ;;;###autoload
-(defun jack-snapshot-to-register (reg)
-  "Store a snapshot of jack connections into register REG.
+(defun jack-snapshot-to-register (snapshot reg)
+  "Store a SNAPSHOT of jack connections into register REG.
 Restore connections using `jump-to-register'."
-  (interactive (list (register-read-with-preview "Jack snapshot to register: ")))
-  (let ((snapshot (jack--snapshot)))
-    (if snapshot
-        (set-register reg
-                      (registerv-make
-                       snapshot
-                      :print-func #'jack--snapshot-princ
-                      :jump-func #'jack--snapshot-restore))
-      (message "There are no connections"))))
+  (interactive
+   (let ((snapshot) (jack--snapshot))
+     (if snapshot
+         (list snapshot
+               (register-read-with-preview "Jack snapshot to register: "))
+       (error "There are no connections"))))
+  (set-register reg
+                (registerv-make
+                 snapshot
+                 :print-func #'jack--snapshot-princ
+                 :jump-func #'jack--snapshot-restore)))
 
 (provide 'jack-connect)
 ;;; jack-connect.el ends here
