@@ -376,5 +376,47 @@ Recursively accumulate atoms descendent from node into each node."
           (call-process "jack_disconnect" nil nil nil
                         p1 p2))))))
 
+
+
+(defun jack--snapshot-restore (alst)
+  "Restore all the connections in ALST."
+  (jack-lsp)
+  (cl-loop
+   for cell in alst
+   for (k . v) = cell
+   when (and (gethash k jack--port-table )
+           (gethash v jack--port-table))
+   do
+   (call-process "jack_connect" nil nil nil k v)))
+
+(defun jack--snapshot-princ (alst)
+  "Display snapshot stored in ALST."
+  (princ (format "jack-snapshot:\n%s" alst)))
+
+(defun jack--snapshot ()
+  "Return an alist with all the current connections in jack."
+  (jack-lsp)
+  (cl-loop
+   for p in (jack--list-ports)
+   when (jack-port-output-p p)
+   append
+   (cl-loop
+    for c in (jack-port-connections p)
+    collect   (cons p c))))
+
+;;;###autoload
+(defun jack-snapshot-to-register (reg)
+  "Store a snapshot of jack connections into register REG.
+Restore connections using `jump-to-register'."
+  (interactive (list (register-read-with-preview "Jack snapshot to register: ")))
+  (let ((snapshot (jack--snapshot)))
+    (if snapshot
+        (set-register reg
+                      (registerv-make
+                       snapshot
+                      :print-func #'jack--snapshot-princ
+                      :jump-func #'jack--snapshot-restore))
+      (message "There are no connections"))))
+
 (provide 'jack-connect)
 ;;; jack-connect.el ends here
