@@ -245,19 +245,19 @@ Recursively accumulate atoms descendent from node into each node."
   (and (memq 'output (jack-port-properties port)) t))
 
 (defun jack-port-audio-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is an audio port."
   (string-match-p "audio" (jack-port-type port)))
 
 (defun jack-port-midi-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is a midi port."
   (string-match-p "midi" (jack-port-type port)))
 
 (defun jack-port-connected-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is connected."
   (jack-port-connections port))
 
 (defun jack-running-p ()
-  "Return t if jack is started."
+  "Return t if jackd is started."
   (pcase (process-lines "jack_wait" "-c" "-s" "default")
     (`("running") t)
     (`("not running") nil)))
@@ -380,20 +380,20 @@ Recursively accumulate atoms descendent from node into each node."
 
 
 
-(defun jack--snapshot-restore (alst)
-  "Restore all the connections in ALST."
+(defun jack--snapshot-restore (snapshot)
+  "Restore all the connections in SNAPSHOT."
   (jack-lsp)
   (cl-loop
-   for cell in alst
+   for cell in snapshot
    for (k . v) = cell
    when (and (gethash k jack--port-table )
            (gethash v jack--port-table))
    do
    (call-process "jack_connect" nil nil nil k v)))
 
-(defun jack--snapshot-princ (alst)
-  "Display snapshot stored in ALST."
-  (princ (format "jack-snapshot:\n%s" alst)))
+(defun jack--snapshot-princ (snapshot)
+  "Display SNAPSHOT."
+  (princ (format "jack-snapshot:\n%s" snapshot)))
 
 (defun jack--snapshot ()
   "Return an alist with all the current connections in jack."
