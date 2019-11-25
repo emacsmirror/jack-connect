@@ -19,10 +19,10 @@
 
 ;;; Commentary:
 
-;; jack-connect and jack-disconnect allow to manage connections of
+;; `jack-connect' and `jack-disconnect' allow to manage connections of
 ;; jackd audio server from Emacs minibuffer.
-;; jack-snapshot-to-register stores a snapshot of current connections
-;; in a register.  That can be later restored using
+;; `jack-snapshot-to-register' stores a snapshot of current
+;; connections in a register.  That can be later restored using
 ;; `jump-to-register'.
 ;;; Code:
 
@@ -245,19 +245,19 @@ Recursively accumulate atoms descendent from node into each node."
   (and (memq 'output (jack-port-properties port)) t))
 
 (defun jack-port-audio-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is an audio port."
   (string-match-p "audio" (jack-port-type port)))
 
 (defun jack-port-midi-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is a midi port."
   (string-match-p "midi" (jack-port-type port)))
 
 (defun jack-port-connected-p (port)
-  "Return t if PORT is an output port."
+  "Return t if PORT is connected."
   (jack-port-connections port))
 
 (defun jack-running-p ()
-  "Return t if jack is started."
+  "Return t if jackd is started."
   (pcase (process-lines "jack_wait" "-c" "-s" "default")
     (`("running") t)
     (`("not running") nil)))
@@ -380,20 +380,20 @@ Recursively accumulate atoms descendent from node into each node."
 
 
 
-(defun jack--snapshot-restore (alst)
-  "Restore all the connections in ALST."
+(defun jack--snapshot-restore (snapshot)
+  "Restore all the connections in SNAPSHOT."
   (jack-lsp)
   (cl-loop
-   for cell in alst
+   for cell in snapshot
    for (k . v) = cell
    when (and (gethash k jack--port-table )
            (gethash v jack--port-table))
    do
    (call-process "jack_connect" nil nil nil k v)))
 
-(defun jack--snapshot-princ (alst)
-  "Display snapshot stored in ALST."
-  (princ (format "jack-snapshot:\n%s" alst)))
+(defun jack--snapshot-princ (snapshot)
+  "Display SNAPSHOT."
+  (princ (format "jack-snapshot:\n%s" snapshot)))
 
 (defun jack--snapshot ()
   "Return an alist with all the current connections in jack."
@@ -407,18 +407,20 @@ Recursively accumulate atoms descendent from node into each node."
     collect   (cons p c))))
 
 ;;;###autoload
-(defun jack-snapshot-to-register (reg)
-  "Store a snapshot of jack connections into register REG.
+(defun jack-snapshot-to-register (snapshot reg)
+  "Store a SNAPSHOT of jack connections into register REG.
 Restore connections using `jump-to-register'."
-  (interactive (list (register-read-with-preview "Jack snapshot to register: ")))
-  (let ((snapshot (jack--snapshot)))
-    (if snapshot
-        (set-register reg
-                      (registerv-make
-                       snapshot
-                      :print-func #'jack--snapshot-princ
-                      :jump-func #'jack--snapshot-restore))
-      (message "There are no connections"))))
+  (interactive
+   (let ((snapshot) (jack--snapshot))
+     (if snapshot
+         (list snapshot
+               (register-read-with-preview "Jack snapshot to register: "))
+       (error "There are no connections"))))
+  (set-register reg
+                (registerv-make
+                 snapshot
+                 :print-func #'jack--snapshot-princ
+                 :jump-func #'jack--snapshot-restore)))
 
 (provide 'jack-connect)
 ;;; jack-connect.el ends here
