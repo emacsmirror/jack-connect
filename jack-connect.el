@@ -411,7 +411,7 @@ Recursively accumulate atoms descendent from node into each node."
   "Store a SNAPSHOT of jack connections into register REG.
 Restore connections using `jump-to-register'."
   (interactive
-   (let ((snapshot) (jack--snapshot))
+   (let ((snapshot (jack--snapshot)))
      (if snapshot
          (list snapshot
                (register-read-with-preview "Jack snapshot to register: "))
