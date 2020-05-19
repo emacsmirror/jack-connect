@@ -288,10 +288,10 @@ Recursively accumulate atoms descendent from node into each node."
 
          ;; port name (sets current-port)
          (t
-          (cl-destructuring-bind (client port)
+          (cl-destructuring-bind (client &rest port)
               (split-string line ":")
             (setf current-port line)
-            (jack--make-port current-port client port))))))))
+            (jack--make-port current-port client (string-join port)))))))))
 
 
 ;;;###autoload
