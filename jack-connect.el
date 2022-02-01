@@ -30,14 +30,20 @@
 (require 'seq)
 (require 'radix-tree)
 
+(defgroup jack-connect
+  nil
+  "Jack connect"
+  :group 'minibuffer)
+
 (defcustom jack-connect-group-ports
   t
-  "If the variable is set jack-connect and disconnect will try to
-group ports within the same client and with the same
-features (i.e. midi or audio, input or output)"
+  "When the variable is not nil, jack-connect and jack-disconnect
+will try to group ports within the same client and with the same
+features (i.e. midi or audio, input or output) and append a
+wildcard character (*) to their common prefix."
   :type 'boolean)
 
-(defstruct jack-port
+(cl-defstruct jack-port
   "Jack port structure"
   ;; client name type connections properties
 
@@ -170,7 +176,7 @@ included to the final alist."
            (-> it
               (radix-tree-from-map)
               (jack--port-tree-flatten))
-         (mapcar (lambda (x) (cons (car x) (list (cdr (x))) )) it))))
+         (mapcar (lambda (x) (cons (car x) (list (cdr x)) )) it))))
 
 (defun jack--port-alist-prepare (lsp)
   (jack--port-alist-prepare-with-pred lsp))
